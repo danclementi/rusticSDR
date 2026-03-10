@@ -1,0 +1,20 @@
+# Normalize line endings
+* text=auto
+
+# Treat firmware and bitstreams as binary
+*.bin binary
+*.fw binary
+*.hex binary
+*.img binary
+
+# Prevent diffs on binary DSP assets
+*.iq binary
+*.wav binary
+
+# Improve diffs for Rust and Python
+*.rs diff=rust
+*.py diff=python
+
+# GitHub linguist: mark Rust and Python as primary
+*.rs linguist-language=Rust
+*.py linguist-language=Python

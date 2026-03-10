@@ -1,0 +1,16 @@
+[package]
+name = "rx888_dsp"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "rx888_dsp"
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.20", features = ["extension-module"] }
+numpy = "0.20"
+num-complex = "0.4"
+rustfft = "6"
+crossbeam-channel = "0.5"
+rx888_stream = { path = "../rx888_stream" }

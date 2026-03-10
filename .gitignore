@@ -1,0 +1,22 @@
+# Rust
+target/
+**/target/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+build/
+dist/
+.maturin/
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db

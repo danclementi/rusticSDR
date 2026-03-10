@@ -1,0 +1,81 @@
+import time
+import numpy as np
+import matplotlib.pyplot as plt
+
+from rx888_dsp import PyStreamManager
+
+
+# ------------------------------------------------------------
+# Configuration
+# ------------------------------------------------------------
+ADC_FREQ = 64_800_000       # 40 MHz ADC clock
+FFT_N = 3240                # FFT size
+FFT_OVERLAP = 5             # overlap factor
+CHUNK_SAMPLES = 4096        # USB read size
+WATERFALL_HEIGHT = 200      # number of rows in waterfall
+CENTER_FREQ = 16_200_000    # 14.2 MHz (example)
+VGA_GAIN = 10               # R82XX VGA gain
+ATT_DB = 20                 # DAT31 attenuation
+
+
+# ------------------------------------------------------------
+# 1. Start StreamManager (handles device, firmware, ADC, FX3)
+# ------------------------------------------------------------
+print("Starting stream manager...")
+sm = PyStreamManager(FFT_N, FFT_OVERLAP, CHUNK_SAMPLES)
+
+print("Streaming... Press Ctrl+C to stop.")
+
+
+# ------------------------------------------------------------
+# 2. Waterfall setup
+# ------------------------------------------------------------
+waterfall = np.zeros((WATERFALL_HEIGHT, FFT_N // 2), dtype=np.float32)
+
+plt.ion()
+fig, ax = plt.subplots(figsize=(10, 6))
+im = ax.imshow(
+    waterfall,
+    aspect='auto',
+    origin='lower',
+    cmap='viridis',
+    vmin=-120,
+    vmax=0
+)
+plt.title("RX-888 Waterfall")
+plt.xlabel("Frequency bin")
+plt.ylabel("Time")
+
+
+# ------------------------------------------------------------
+# 3. Main loop: receive FFT frames and update waterfall
+# ------------------------------------------------------------
+try:
+    last_stats = time.time()
+
+    while True:
+        frame = sm.try_recv_frame()
+        if frame is None:
+            continue
+
+        # Convert complex64 array to magnitude in dB
+        spec = np.array(frame, dtype=np.complex64)
+        mag = 20 * np.log10(np.abs(spec) + 1e-12)
+
+        # Update waterfall
+        waterfall = np.roll(waterfall, -1, axis=0)
+        waterfall[-1, :] = mag[:FFT_N // 2]
+
+        im.set_data(waterfall)
+        plt.pause(0.001)
+
+        # Print stats every 2 seconds
+        now = time.time()
+        if now - last_stats > 2.0:
+            print("Stats:", sm.stats())
+            last_stats = now
+
+except KeyboardInterrupt:
+    print("Stopping...")
+    sm.stop()
+    time.sleep(0.5)
