@@ -11,6 +11,7 @@ crate-type = ["rlib", "cdylib"]
 pyo3 = { version = "0.20", features = ["extension-module"] }
 numpy = "0.20"
 num-complex = "0.4"
+realfft = "3"
 rustfft = "6"
 crossbeam-channel = "0.5"
 rx888_stream = { path = "../rx888_stream" }

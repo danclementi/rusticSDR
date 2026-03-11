@@ -1,16 +1,28 @@
+mod fft_pipeline;
+
+pub use fft_pipeline::FftPipeline;
+
+use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
-use pyo3::types::PyComplex;
+use pyo3::types::PyBytes;
 use numpy::PyArray1;
-use rustfft::num_complex::{Complex32, Complex64};
+use numpy::PyArray1 as NpyArray1; // make sure `numpy = "0.21"` (or similar) is in Cargo.toml
 
+use rx888_stream::{SampleRate, StreamManager, Rx888Error};
 
-mod stream_manager;
-mod pipeline;
-mod fft_engine;
-mod overlap_save;
+fn to_pyerr(e: Rx888Error) -> PyErr {
+    PyRuntimeError::new_err(format!("RX-888 error: {e:?}"))
+}
 
-use stream_manager::StreamManager;
-// use pipeline::Complex32;
+fn map_sample_rate(s: Option<&str>) -> Result<SampleRate, Rx888Error> {
+    match s {
+        None => Ok(SampleRate::Sps64_8M), // default
+        Some("32.4M") | Some("32.4m") => Ok(SampleRate::Sps32_4M),
+        Some("64.8M") | Some("64.8m") => Ok(SampleRate::Sps64_8M),
+        Some("129.6M") | Some("129.6m") => Ok(SampleRate::Sps129_6M),
+        Some(other) => Err(Rx888Error::Usb(format!("Unsupported sample rate: {other}"))),
+    }
+}
 
 #[pyclass]
 pub struct PyStreamManager {
@@ -19,36 +31,106 @@ pub struct PyStreamManager {
 
 #[pymethods]
 impl PyStreamManager {
+    /// Create a new RX-888 stream.
+    ///
+    /// sample_rate: "32.4M", "64.8M", or "129.6M" (default: "64.8M")
     #[new]
-    fn new(n: usize, v: usize, chunk_samples: usize) -> PyResult<Self> {
-        Ok(PyStreamManager {
-            inner: StreamManager::start(n, v, chunk_samples),
-        })
+    pub fn new(sample_rate: Option<&str>) -> PyResult<Self> {
+        let rate = map_sample_rate(sample_rate).map_err(to_pyerr)?;
+        let inner = StreamManager::new(rate).map_err(to_pyerr)?;
+        Ok(Self { inner })
     }
 
-    fn stop(&self) {
-        self.inner.stop();
+    pub fn start(&mut self) -> PyResult<()> {
+        self.inner.start().map_err(to_pyerr)?;
+        Ok(())
     }
 
-    fn try_recv_frame<'py>(&self, py: Python<'py>) -> PyResult<Option<&'py PyArray1<Complex64>>> {
-        if let Some(frame) = self.inner.try_recv_frame() {
-            // Convert Complex32 → Complex64 (NumPy-compatible)
-            let converted: Vec<Complex64> = frame
-                .iter()
-                .map(|c: &Complex32| Complex64::new(c.re as f64, c.im as f64))
-                .collect();
+    pub fn stop(&mut self) -> PyResult<()> {
+        self.inner.stop().map_err(to_pyerr)?;
+        Ok(())
+    }
 
-            Ok(Some(PyArray1::from_vec(py, converted)))
-        } else {
-            Ok(None)
+    pub fn is_running(&self) -> bool {
+        self.inner.is_running()
+    }
+
+    /// Read `n_bytes` of raw IQ data (uint8) from the stream.
+    pub fn read_samples<'py>(
+        &mut self,
+        py: Python<'py>,
+        n_bytes: usize,
+    ) -> PyResult<&'py PyBytes> {
+        let mut buf = vec![0u8; n_bytes];
+        self.inner.read_samples(&mut buf).map_err(to_pyerr)?;
+        Ok(PyBytes::new(py, &buf))
+    }
+}
+
+
+
+#[pyclass]
+pub struct PyFftPipeline {
+    inner: FftPipeline,
+}
+
+#[pymethods]
+impl PyFftPipeline {
+    /// Create a new FFT pipeline with the given fft_size.
+    #[new]
+    pub fn new(fft_size: usize) -> Self {
+        Self {
+            inner: FftPipeline::new(fft_size),
         }
     }
 
+    /// Process one frame of i16 samples (as Python bytes) and return magnitude spectrum as numpy.float32 array.
+    pub fn process<'py>(
+        &mut self,
+        py: Python<'py>,
+        samples: &PyBytes,
+    ) -> PyResult<&'py NpyArray1<f32>> {
+        let buf = samples.as_bytes();
 
-    fn stats(&self) -> (u64, u64) {
-        self.inner.stats()
+        if buf.len() % 2 != 0 {
+            return Err(PyRuntimeError::new_err("Input buffer length must be even (i16 samples)"));
+        }
+
+        let n_samples = buf.len() / 2;
+        if n_samples != self.inner.fft_size() {
+            return Err(PyRuntimeError::new_err(format!(
+                "Expected {} samples, got {}",
+                self.inner.fft_size(),
+                n_samples
+            )));
+        }
+
+        // Interpret bytes as i16
+        let mut frame = Vec::with_capacity(n_samples);
+        for chunk in buf.chunks_exact(2) {
+            let v = i16::from_le_bytes([chunk[0], chunk[1]]);
+            frame.push(v);
+        }
+
+        let mag = self.inner.process(&frame);
+
+        // Return as NumPy array (zero-copy from Rust slice)
+        let out = PyArray1::from_slice(py, mag);
+        Ok(out)
+    }
+
+    pub fn fft_size(&self) -> usize {
+        self.inner.fft_size()
+    }
+
+    pub fn spectrum_len(&self) -> usize {
+        self.inner.spectrum_len()
     }
 }
+
+
+
+
 
 
 #[pymodule]
@@ -56,71 +138,3 @@ fn rx888_dsp(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<PyStreamManager>()?;
     Ok(())
 }
-
-// use pyo3::prelude::*;
-// use pyo3::types::PyComplex;
-
-// mod pipeline;
-// mod overlap_save;
-// mod stream_manager;
-
-
-
-// use crate::stream_manager::StreamManager;
-// use num_complex::Complex32;
-
-// #[pyclass]
-// pub struct PyStreamManager {
-//     inner: StreamManager,
-// }
-
-// #[pymethods]
-// impl PyStreamManager {
-//     /// Create and start the stream manager.
-//     ///
-//     /// n = FFT size
-//     /// v = overlap factor
-//     /// chunk_samples = number of int16 samples per read
-//     #[new]
-//     fn new(n: usize, v: usize, chunk_samples: usize) -> Self {
-//         let inner = StreamManager::start(n, v, chunk_samples);
-//         Self { inner }
-//     }
-
-//     /// Non-blocking poll for one FFT frame.
-//     /// Returns a Python list of complex numbers or None.
-//     fn poll_frame(&self, py: Python<'_>) -> PyResult<Option<Vec<PyObject>>> {
-//         if let Some(frame) = self.inner.try_recv_frame() {
-//             let pylist: Vec<PyObject> = frame
-//                 .into_iter()
-//                 .map(|c: Complex32| {
-//                     PyComplex::from_doubles(py, c.re as f64, c.im as f64)
-//                         .into_py(py)
-//                 })
-//                 // .map(|c: Complex32| {
-//                 //     PyComplex::from_doubles(c.re as f64, c.im as f64)
-//                 //         .into_py(py)
-//                 // })
-//                 .collect();
-//             Ok(Some(pylist))
-//         } else {
-//             Ok(None)
-//         }
-//     }
-
-//     /// Return (bytes_in, frames_out)
-//     fn stats(&self) -> PyResult<(u64, u64)> {
-//         Ok(self.inner.stats())
-//     }
-
-//     /// Stop the producer + consumer threads
-//     fn stop(&self) {
-//         self.inner.stop();
-//     }
-// }
-
-// #[pymodule]
-// fn rx888_dsp(_py: Python, m: &PyModule) -> PyResult<()> {
-//     m.add_class::<PyStreamManager>()?;
-//     Ok(())
-// }
