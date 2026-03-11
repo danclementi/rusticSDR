@@ -29,15 +29,32 @@ def main():
 
     try:
         while True:
+            if not plt.fignum_exists(fig.number):
+                break
+        
             # Read raw i16 samples (2 bytes per sample)
-            raw = stream.read_samples(FFT_SIZE * 2)
+            # raw = stream.read_samples(FFT_SIZE * 2)
+
+            raw = stream.read_samples(16384 * 2)
+            s = np.frombuffer(raw, dtype='<i2')
+
+            # print("std:", np.std(s))
+            # print("mean:", np.mean(s))
+            # print("max:", np.max(s), "min:", np.min(s))
+
+            # s = np.frombuffer(raw, dtype='<i2')  # little-endian int16
+            # print("min:", s.min(), "max:", s.max(), "mean:", s.mean())
+            # print("first 16 samples:", s[:16])
 
             # Rust FFT → NumPy array
             mag = fft.process(raw)
+            mag_db = 20 * np.log10(mag + 1e-12)
+
 
             # Update plot
-            line.set_ydata(mag)
-            ax.set_ylim(0, float(np.max(mag)) * 1.1)
+            line.set_ydata(mag_db)
+            ax.set_ylim(np.max(mag_db) - 80, np.max(mag_db) + 5)
+
             fig.canvas.draw()
             fig.canvas.flush_events()
 

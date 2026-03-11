@@ -1,6 +1,7 @@
 // rx888_stream/src/stream_manager.rs
 
 use std::thread;
+use std::thread::sleep;
 use std::time::Duration;
 
 use crate::device::{DeviceMode, Rx888Device, Rx888Result};
@@ -44,10 +45,17 @@ impl StreamManager {
             return Ok(());
         }
 
-        // ADC + tuner bring-up
+        // Always stop FX3 first — safe even if not running
+        let _ = self.dev.stop_fx3();
+        let _ = self.dev.stop_fx3();
+
+        // Give FX3 time to fully stop its streaming engine
+        sleep(Duration::from_millis(500));
+
+        // ADC + HF/VHF bring-up (uses SETARG)
         init::initialize_device(&mut self.dev, self.rate)?;
 
-        // Start FX3 streaming engine
+        // Now start FX3 streaming engine
         self.dev.start_fx3()?;
 
         self.running = true;

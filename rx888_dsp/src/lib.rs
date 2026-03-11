@@ -128,13 +128,9 @@ impl PyFftPipeline {
     }
 }
 
-
-
-
-
-
 #[pymodule]
 fn rx888_dsp(_py: Python, m: &PyModule) -> PyResult<()> {
     m.add_class::<PyStreamManager>()?;
+    m.add_class::<PyFftPipeline>()?;   // <-- REQUIRED
     Ok(())
 }

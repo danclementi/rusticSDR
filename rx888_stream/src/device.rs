@@ -11,6 +11,8 @@ use std::io::{Error as IoError, ErrorKind};
 use std::io::{self, Read, Cursor};
 use std::num::Wrapping;
 use std::time::Duration;
+// use anyhow::Result;
+
 
 use rusb::constants::{
     LIBUSB_ENDPOINT_OUT,
@@ -77,11 +79,11 @@ pub enum StartResult {
     AlreadyRuntime,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum DeviceMode {
-    Bootloader,
-    Runtime,
-}
+// #[derive(Debug, Clone, Copy)]
+// pub enum DeviceMode {
+//     Bootloader,
+//     Runtime,
+// }
 
 #[derive(Debug)]
 pub enum Rx888Error {
@@ -89,6 +91,12 @@ pub enum Rx888Error {
     Usb(String),
     Firmware(String),
     DeviceNotFound,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceMode {
+    Bootloader,
+    Runtime,
 }
 
 pub struct Rx888Device {
@@ -151,7 +159,7 @@ impl Rx888Device {
         Ok(())
     }
 
-    fn send_argument(&mut self, arg: ArgumentList, value: u16) -> Rx888Result<()> {
+    pub fn send_argument(&mut self, arg: ArgumentList, value: u16) -> Rx888Result<()> {
         let timeout = Duration::from_secs(1);
         self.handle.write_control(
             LIBUSB_ENDPOINT_OUT | LIBUSB_REQUEST_TYPE_VENDOR,
@@ -173,12 +181,13 @@ impl Rx888Device {
         Ok(())
     }
 
-    /// Open the RX‑888 device by index.
     pub fn open(index: usize) -> Rx888Result<Self> {
         let devices = rusb::devices().map_err(|e| Rx888Error::Usb(e.to_string()))?;
 
         let mut runtime_matches = Vec::new();
         let mut boot_matches = Vec::new();
+
+        eprintln!("entered open....");
 
         for device in devices.iter() {
             let desc = device.device_descriptor().map_err(|e| Rx888Error::Usb(e.to_string()))?;
@@ -223,8 +232,12 @@ impl Rx888Device {
             DeviceMode::Bootloader
         };
 
-        Ok(Self { handle, mode })
+        // ⭐ FIX: FX3 needs time to settle when already in runtime mode
+        if mode == DeviceMode::Runtime {
+            std::thread::sleep(std::time::Duration::from_millis(200));
+        }
 
+        Ok(Self { handle, mode })
     }
 
     /// Blocking read of raw int16 samples into the provided buffer.
@@ -238,7 +251,7 @@ impl Rx888Device {
             .read_bulk(0x81, buf, timeout)
             .map_err(|e| Rx888Error::Usb(e.to_string()))?;
 
-        eprintln!("read_bulk returned {} bytes", n);
+        // eprintln!("read_bulk returned {} bytes", n);
 
         if n == 0 {
             return Err(Rx888Error::Usb("Zero-length read".to_string()));
@@ -255,16 +268,47 @@ impl Rx888Device {
 
         Ok(())
     }
+    /// Write a single RX-888 Mk II register.
+    pub fn write_reg(&self, addr: u8, value: u8) -> Rx888Result<()> {
+        self.handle
+            .write_control(
+                0x40,
+                0xB0,
+                value as u16,
+                addr as u16,
+                &[],
+                Duration::from_millis(10),
+            )
+            .map_err(|e| Rx888Error::Usb(format!("write_reg({addr:#04x}) failed: {e}")))?;
+        Ok(())
+    }
+
+    /// Initialize the HF front-end path (0–32 MHz).
+    /// This must be called AFTER firmware load and BEFORE ADC start.
+    pub fn init_hf(&self) -> Rx888Result<()> {
+        println!("Initializing HF is called");
+        self.write_reg(0x01, 0x00)?; // HF path
+        self.write_reg(0x02, 20)?;   // RF attenuator
+        self.write_reg(0x03, 0)?;    // LNA gain
+        self.write_reg(0x04, 0)?;    // IF gain
+        self.write_reg(0x05, 0)?;    // ADC PGA
+        self.write_reg(0x06, 0x00)?; // ADC mode
+        self.write_reg(0x07, 0x01)?; // FPGA routing
+        Ok(())
+    }
+
 
     pub fn start_adc(&mut self, adc_freq_hz: u32) -> Rx888Result<()> {
         self.send_cmd_u32(FX3Command::STARTADC, adc_freq_hz)
     }
 
     pub fn start_fx3(&mut self) -> Rx888Result<()> {
+        eprintln!("STARTFX3 → sending command");
         self.send_cmd_u32(FX3Command::STARTFX3, 0)
     }
 
     pub fn stop_fx3(&mut self) -> Rx888Result<()> {
+        eprintln!("STOPFX3 → sending command");
         self.send_cmd_u32(FX3Command::STOPFX3, 0)
     }
 
