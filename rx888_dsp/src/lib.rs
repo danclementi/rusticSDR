@@ -9,6 +9,7 @@ use numpy::PyArray1;
 use numpy::PyArray1 as NpyArray1; // make sure `numpy = "0.21"` (or similar) is in Cargo.toml
 
 use rx888_stream::{SampleRate, StreamManager, Rx888Error};
+// use rx888_stream::PyRx888Device;
 
 fn to_pyerr(e: Rx888Error) -> PyErr {
     PyRuntimeError::new_err(format!("RX-888 error: {e:?}"))
@@ -29,21 +30,27 @@ pub struct PyStreamManager {
     inner: StreamManager,
 }
 
+
 #[pymethods]
 impl PyStreamManager {
     /// Create a new RX-888 stream.
     ///
     /// sample_rate: "32.4M", "64.8M", or "129.6M" (default: "64.8M")
     #[new]
-    pub fn new(sample_rate: Option<&str>) -> PyResult<Self> {
-        let rate = map_sample_rate(sample_rate).map_err(to_pyerr)?;
-        let inner = StreamManager::new(rate).map_err(to_pyerr)?;
+    pub fn new(sample_rate: &str) -> PyResult<Self> {
+        // Convert &str → Option<&str> → SampleRate
+        let rate = map_sample_rate(Some(sample_rate))
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+
+        // Now pass the SampleRate enum into StreamManager::new()
+        let inner = StreamManager::new(rate)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))?;
+
         Ok(Self { inner })
     }
 
-    pub fn start(&mut self) -> PyResult<()> {
-        self.inner.start().map_err(to_pyerr)?;
-        Ok(())
+    fn start(&mut self) -> PyResult<()> {
+        self.inner.start().map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
     }
 
     pub fn stop(&mut self) -> PyResult<()> {
@@ -65,6 +72,19 @@ impl PyStreamManager {
         self.inner.read_samples(&mut buf).map_err(to_pyerr)?;
         Ok(PyBytes::new(py, &buf))
     }
+    
+    fn set_vga(&mut self, code: u16) -> PyResult<()> {
+        self.inner
+            .set_vga(code)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
+    fn set_attenuator(&mut self, att: u16) -> PyResult<()> {
+        self.inner
+            .set_attenuator(att)
+            .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(e.to_string()))
+    }
+
 }
 
 

@@ -13,6 +13,13 @@ use std::num::Wrapping;
 use std::time::Duration;
 // use anyhow::Result;
 
+use std::fmt;
+
+impl fmt::Display for Rx888Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
 
 use rusb::constants::{
     LIBUSB_ENDPOINT_OUT,
@@ -523,5 +530,15 @@ impl Rx888Device {
 
         Err(Rx888Error::Usb(format!("Unexpected PID {:04x}", pid)))
     }
+
+    // pub fn set_vga(&mut self, reg: u8) -> Result<(), Rx888Error> {
+    //     self.write_arg(ArgumentList::AD8370_VGA, reg)
+    // }
+
+    // pub fn set_attenuator(&mut self, att: u8) -> Result<(), Rx888Error> {
+    //     self.write_arg(ArgumentList::DAT31_ATT, att)
+    // }
+
+
 
 }

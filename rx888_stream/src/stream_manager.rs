@@ -67,16 +67,24 @@ impl StreamManager {
             return Ok(());
         }
 
+        // Stop FX3 streaming engine
         self.dev.stop_fx3()?;
+
+        // Give FX3 time to halt transfers
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
         self.running = false;
         Ok(())
-    }
+}
 
     /// Blocking read of one chunk of IQ samples.
     pub fn read_samples(&mut self, buf: &mut [u8]) -> Rx888Result<()> {
+        if !self.running {
+            return Err(Rx888Error::Usb("Stream stopped".into()));
+        }
         self.dev.read_samples(buf)
     }
-
+    
     pub fn is_running(&self) -> bool {
         self.running
     }
@@ -84,4 +92,13 @@ impl StreamManager {
     pub fn sample_rate(&self) -> SampleRate {
         self.rate
     }
+
+    pub fn set_vga(&mut self, code: u16) -> Rx888Result<()> {
+        self.dev.set_gain_from_python(11, code)
+    }
+
+    pub fn set_attenuator(&mut self, att: u16) -> Rx888Result<()> {
+        self.dev.set_gain_from_python(10, att)
+    }
+
 }
